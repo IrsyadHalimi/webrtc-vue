@@ -1,10 +1,14 @@
 <template>
     <div>
-        <video ref="localVideo" autoplay muted playsinline></video>
-        <video ref="remoteVideo" autoplay playsinline></video>
-        <input v-model="room" placeholder="Enter Room ID" />
-        <button @click="startCall">Start</button>
-        <button @click="joinCall">Join</button>
+        <h1>Join Video Call</h1>
+        <div>
+            <input v-model="roomId" placeholder="Enter Room ID" />
+            <button @click="startCall">Join</button>
+        </div>
+        <div v-if="inRoom">
+            <video ref="myVideo" autoplay playsinline muted></video>
+            <video ref="remoteVideo" autoplay playsinline></video>
+        </div>
     </div>
 </template>
 
@@ -12,57 +16,32 @@
 import { ref } from "vue";
 import { io } from "socket.io-client";
 
-const localVideo = ref(null);
+const roomId = ref("");
+const inRoom = ref(false);
+
+const myVideo = ref(null);
 const remoteVideo = ref(null);
-const room = ref("");
+
+const socket = io(import.meta.env.VITE_SIGNALING_SERVER);
 let localStream;
 let peerConnection;
-const socket = io(import.meta.env.VITE_SIGNALING_SERVER);
 
 const config = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-socket.on("user-joined", async () => {
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    socket.emit("offer", { room: room.value, offer });
-});
+const startCall = async () => {
+    if (!roomId.value) return alert("Room ID required");
 
-socket.on("offer", async (offer) => {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.emit("answer", { room: room.value, answer });
-});
-
-socket.on("answer", async (answer) => {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-});
-
-socket.on("ice-candidate", async (candidate) => {
-    try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (e) {
-        console.error("Error adding ICE candidate: ", e);
-    }
-});
-
-async function startCall() {
     await initStream();
-    socket.emit("join", room.value);
     createPeerConnection();
-}
-
-async function joinCall() {
-    await initStream();
-    socket.emit("join", room.value);
-    createPeerConnection();
-}
+    socket.emit("join", roomId.value);
+    inRoom.value = true;
+};
 
 async function initStream() {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    localVideo.value.srcObject = localStream;
+    myVideo.value.srcObject = localStream;
 }
 
 function createPeerConnection() {
@@ -78,17 +57,42 @@ function createPeerConnection() {
 
     peerConnection.onicecandidate = event => {
         if (event.candidate) {
-            socket.emit("ice-candidate", { room: room.value, candidate: event.candidate });
+            socket.emit("ice-candidate", { room: roomId.value, candidate: event.candidate });
         }
     };
 }
+
+socket.on("user-joined", async () => {
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+  socket.emit("offer", { room: roomId.value, offer });
+});
+
+socket.on("offer", async (offer) => {
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  socket.emit("answer", { room: roomId.value, answer });
+});
+
+socket.on("answer", async (answer) => {
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+});
+
+socket.on("ice-candidate", async ({ candidate }) => {
+  try {
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (e) {
+    console.error("Error adding ICE candidate:", e);
+  }
+});
 </script>
 
 <style scoped>
 video {
-    width: 300px;
-    height: 200px;
-    margin: 10px;
-    background: black;
+  width: 300px;
+  height: 200px;
+  margin: 10px;
+  background: black;
 }
 </style>
